@@ -1,0 +1,210 @@
+---
+title: "find neighbors-vowels"
+Authors: "Brian Rocca & Frank Martino"
+---
+Full citation: 
+"Rocca, B., Martino, F., & Darcy, I. (2023, September 6-8). How misperception affects the structure of the L2 mental lexicon: A re-analysis of Cutler (2005) [Paper presentation]. The 14th Pronunciation in Second Language Learning and Teaching Conference, Purdue University, West Lafayette, IN. https://web.cvent.com/event/e0861a1b-556f-4a6c-8e1a-3f11196b6380/summary.
+
+
+
+Because this analysis is the same whether I replace /E/ -> /ae/ or vice versa, I'm only doing the analysis for /E/ to /ae/. 
+
+```{r}
+library(vwr)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) #set WD to sourcefile loc
+```
+
+Originally, I used functions from the nFreq package by Cynthia Siew. However, I wasn't able to embed these functions inside other functions. So we are re-writing her functions with a few minor changes so that we can use them here. 
+```{r}
+neighbor_fix <- function (stimuli, df)
+{
+  if (class(stimuli) != "character" || is.vector(stimuli) ==
+      F) {
+    stop("Warning! Stimuli is either not of character type or is not a vector.")
+  }
+  if (is.data.frame(df) == F) {
+    stop("Warning! df is not a dataframe type.")
+  }
+  if ("Phono" %in% colnames(df) == F) {
+    stop("Warning! Data does not contain a \"Phono\" column.")
+  }
+  output <- as.data.frame(matrix(0, ncol = 2, nrow = length(stimuli)))
+  colnames(output) <- c("Stimuli", "NeighborList")
+  for (i in 1:length(stimuli)) {
+    output$Stimuli[i] <- stimuli[i]
+    output$NeighborList[i] <- paste(vwr::levenshtein.neighbors(stimuli[i], #changed to NFreq::levenshtein.neighbors
+                                                          df$Phono)[[1]], collapse = " ") #changed to df$Phono
+  }
+  return(output)
+}
+
+
+degree_fix <- function (stimuli, df) {
+  #stimuli = character vector of words to calculate degree
+  #df = corpus
+
+  #check that stimuli is a character vector
+  if (class(stimuli) != 'character' || is.vector(stimuli) == F) {
+    stop('Warning! Stimuli is either not of character type or is not a vector.')
+  }
+
+  #check that the df is correctly input
+  if (is.data.frame(df) == F) {
+    stop('Warning! df is not a dataframe type.')
+  }
+
+  if ('Phono' %in% colnames(df) == F) {
+    stop('Warning! Data does not contain a "Phono" column.')
+  }
+
+  #initialize a data frame to save data to
+  output <- as.data.frame(matrix(0, ncol = 2, nrow = length(stimuli)))
+  colnames(output) <- c('Stimuli', 'Degree')
+
+  for (i in 1:length(stimuli)) {
+    # save word to output
+    output$Stimuli[i] <- stimuli[i]
+    # save degree to output
+    output$Degree[i] <- length(vwr::levenshtein.neighbors(stimuli[i], df$Phono)[[1]])
+  }
+
+  return(output)
+
+}
+```
+
+
+```{r}
+find_neighbors <- function(df) {
+  
+  #It must be called "data" for the Nfreq functions to work
+  dat <- df |> 
+    dplyr::rename(Phono = klattese, words = word)
+      
+  # the stimuli argument should point to the klattese since that is what will be used to find the 1-edit distance neighbors
+  words.neighbors <- neighbor_fix(stimuli = dat$Phono, df = dat) 
+      
+  #get degree
+  words.degree <- degree_fix(stimuli = dat$Phono, df = dat) 
+      
+  #####################################################
+  #merge nfreq outputs 
+  words.combo <- cbind(words.degree[order(words.degree$Stimuli, decreasing = FALSE),],
+                       words.neighbors[order(words.neighbors$Stimuli, decreasing = FALSE),] ) |> 
+    dplyr::rename("klattese"="Stimuli")
+      
+  #Merge neighbors and degree into dataframe
+  df.1 <- dplyr::left_join(df, words.combo, by="klattese") #degree
+
+  df.2 <- df.1 |>
+      dplyr::select(word, klattese, klattese_orig, IPA, Degree, NeighborList, level, freq_per_mil, zipf_value, POS, guideword, topic) |>  #select the columns wanted
+    dplyr::rename(neighbors=NeighborList, degree=Degree) |>
+   unique() #delete rows that were duplicate
+  
+  return(df.2)
+  }
+```
+
+
+Change all /E/ word to /ae/. Keep original "klattese" column as "klattese_orig" just to make sure that I'm changing Klattese correctly. 
+```{r}
+d.0 <- readxl::read_excel("EVP_cumulative_v9.xlsx", 6) 
+
+all.E <- d.0 |> 
+  dplyr::mutate(klattese_orig= klattese) |> 
+  dplyr::mutate(klattese = stringr::str_replace_all(klattese, "@", "E")) |> #change all ae to E
+  dplyr::select(word, klattese, klattese_orig, IPA,level, freq_per_mil, zipf_value, POS:topic)
+```
+
+Break down into cumulative CEFR proficiency levels (A1, A2, B1, B2, C1, C2). So a1 only has a1 in it. A2 has a1 and a2. etc. 
+```{r}
+E.input.a1 <- all.E |> 
+   dplyr::filter(level=="A1")
+
+E.input.a2 <- all.E |>
+  dplyr::filter(level=="A1" | level=="A2")
+
+E.input.b1 <- all.E |>
+  dplyr::filter(level=="A1" | level=="A2" | level=="B1")
+
+E.input.b2 <- all.E |>
+  dplyr::filter(level=="A1" | level=="A2" | level=="B1" | level=="B2")
+
+E.input.c1 <- all.E |>
+   dplyr::filter(level=="A1" | level=="A2" | level=="B1" | level=="B2" | level=="C1")
+
+E.input.c2 <- all.E |>
+   dplyr::filter(level=="A1" | level=="A2" | level=="B1" | level=="B2" | level=="C1" | level=="C2")
+```
+
+
+Calculate how many homophones are created with each new proficiency (e.g., "light"/"right") level. The number of duplicates reprsents the number of pseudo-homophones in the lexicon at each proficiency level. 
+```{r}
+E_a1_homophones <- sum(duplicated(E.input.a1$klattese)) #3 homophones
+E_a2_homophones <- sum(duplicated(E.input.a2$klattese)) #5 homophones
+E_b1_homophones <- sum(duplicated(E.input.b1$klattese)) #9 homophones
+E_b2_homophones <- sum(duplicated(E.input.b2$klattese)) #14 homophones
+E_c1_homophones <- sum(duplicated(E.input.c1$klattese)) #18 homophones
+E_c2_homophones <- sum(duplicated(E.input.c2$klattese)) #22 homophones
+```
+
+
+# Part 2
+Now delete the homophones from each level and rerun functions to find the network degree. If you don't do this, then the numbers are inflated because you have, for example <bend> and <band> as homophones but with separate phonological representations. We should assume 1 representation for each unique phonological form.  
+
+```{r}
+remove_homophones <- function(df) {
+  df_new <- df |>
+  dplyr::group_by(klattese) |> #group by phonological form
+  dplyr::filter(level==min(level)) |>  #of duplicates, keep word with lowest level (learned earlier) 
+  dplyr::filter(freq_per_mil==max(freq_per_mil)) |> #of any remaining duplicates, keep word with higher frequency
+  dplyr::select(word, klattese, klattese_orig, IPA, level, freq_per_mil, zipf_value, POS, guideword, topic) |>
+  dplyr::ungroup()
+  return(df_new)
+}
+
+HomophonesRmvd.a1 <- remove_homophones(E.input.a1) 
+
+HomophonesRmvd.a2 <- remove_homophones(E.input.a2) 
+
+HomophonesRmvd.b1 <- remove_homophones(E.input.b1) 
+
+HomophonesRmvd.b2 <- remove_homophones(E.input.b2) 
+
+HomophonesRmvd.c1 <- remove_homophones(E.input.c1) 
+
+HomophonesRmvd.c2 <- remove_homophones(E.input.c2) 
+
+
+del_homophones <- E.input.c2[which(!E.input.c2$word %in% HomophonesRmvd.c2$word), ] #create DF with duplicate words that were deleted
+```
+
+Re-calculate PND now that all E -> ae, and all duplicate phonological forms have been removed. 
+```{r}
+network.a1 <- find_neighbors(HomophonesRmvd.a1)
+network.a2 <- find_neighbors(HomophonesRmvd.a2)
+network.b1 <- find_neighbors(HomophonesRmvd.b1)
+network.b2 <- find_neighbors(HomophonesRmvd.b2)
+network.c1 <- find_neighbors(HomophonesRmvd.c1)
+network.c2 <- find_neighbors(HomophonesRmvd.c2)
+
+# openxlsx::write.xlsx(network.c2, file = "EVP_v9_all_E_misperception.xlsx")
+```
+
+
+Re-calculate network degree
+
+```{r}
+#sum degree
+#this returns the number of neighbors per level
+#It is the answer to analysis 4 (pseudo-phonological neighbors)
+sum(network.a1$degree)/2 #584
+sum(network.a2$degree)/2 #1838
+sum(network.b1$degree)/2 #3600
+sum(network.b2$degree)/2 #5773
+sum(network.c1$degree)/2 #6620
+sum(network.c2$degree)/2 #7765
+```
+
+
+

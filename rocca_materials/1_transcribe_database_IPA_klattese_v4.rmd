@@ -1,0 +1,211 @@
+---
+title: "convert IPA-Klattese"
+author: "Brian Rocca"
+date: 'June 1, 2022'
+---
+V3: This version of the script creates a column called `klattese_syllable` that is the same as `klattese` except that it still has syllable boundaries in it, which are marked using "."
+
+```{r setup, include=FALSE}
+# library(tidyverse)
+#evp = English Vocabulary Profile
+
+#read in data
+df <- readxl::read_excel("combined_raw_data_2_EVP.xlsx", range = cellranger::cell_cols("A:G"))
+
+#make columns lowercase before creating klattese columns, which are caps sensitive
+char_columns <- names(df)[sapply(df, is.character) & !names(df) %in% c("IPA", "level")]  #get names of char columns 
+                                                                                          #except for "IPA" and "level"
+df[, char_columns] <- lapply(df[, char_columns], tolower) # make char_columns lower case
+```
+
+Create a lookup table that can be used to convert characters. Use unicode instead of characters to ensure that I am using the write characters. To print a unicode character, you need \u to tell R it's a unicode character and then its number. For example, print("\u0329"). I need two tables because I want to first replace all double character symbols (i.e., diphthongs) and then replace all single character symbols. Note: I noticed that cambridge is transcribing words like "world" as [wɜrld]. It's redundant to use this vowel and r. So I added to the double_chars table convert [ɜr] (IPA) to [R] (klattese) 
+
+```{r double_chars, include=FALSE}
+#create look up table for double chars
+ipa.guide <- c("eɪ", "ɑʊ", "ɑɪ", "aɪ", "ɔI", "oʊ", #diphthongs (ɑɪ/ai is converting to the same klattese char)
+               "tʃ", "dʒ", #affricates
+               "\u006E\U0329", "\u006D\u0329","\u006C\U0329", #syllabic consonants
+               "ɜr")
+
+ipa <- c("\u0065\u026A", "\u0251\u028A", "\u0251\u026A", "\u0061\u026A", "\u0254\u026A", "\u006F\u028A", #diphs 
+         "\u0074\u0283", "\u0064\u0292",                 #affricates
+         "\u006E\U0329", "\u006D\U0329","\u006C\U0329",  #syllabic cons
+         "\u025C\u0072") #ɜr)
+
+klattese <- c("\u0041", "\u0057", "\u0059", "\u0059", "\u004F", "\u006F", #diphs  I'm calling /e/ A 
+                                                  #because Cambridge calls epsilon /e/. So                                                                          #this was causing me a problem downstream when I convert /e/ to /E/
+              "\u0043", "\u004A",           #affricates
+              "\u004E", "\u004D", "\u004C", #syllabic cons
+              "\u0052") #R
+
+#create lookup table
+lookup_double_chars <- data.frame(ipa.guide, ipa, klattese) #rerun after each addition
+
+```
+https://dictionary.cambridge.org/us/help/phonetics.html
+The dipthong symbols Cambridge uses are slightly different from what Klattese prescribes. Cambridge's American English diphthongs:
+* eɪ 	day
+* aɪ 	eye
+  + I'm using a different onset character in /aI/ above. If I run into any issues, I can try this IPA unicode "\u0061\u026A"
+* ɔɪ 	boy
+* aʊ 	mouth
+* oʊ 	nose (US)
+
+```{r single_chars, include=FALSE}
+#build lookup table for single chars
+
+ipa.guide <- c("i", "I", "ε", "ae",     #vowels  note: Cambridge calls the vowel epsilon /e/. 
+                                        #I'm calling it epsilon here 
+               "ɑ", "^", "ɔ", "o", "ʊ", #I don't need this guide, but it helped me just quickly double check
+                                      #that I am putting unicode in the right place
+               "u", "ɝ", "ə", "ɨ", "ɚ",
+               "p", "t", "k", "b", "d", "g", #stops
+               "s", "ʃ", "z", "ʒ",           #sibilant fricatives
+               "f", "θ", "v", "ð", "h",      #non-sibilant fricatives
+               "n", "m", "ŋ",                #nasals
+               "l", "ɹ", "w", "j", "e")           #glides & semi-vowels
+
+ipa <- c("\u0069", "\u026A", "\u0065", "\u00E6",           #vowels
+         "\u0251", "\u028C", "\u0254", "\u006F", "\u028A", #trying 01B1 instead of 028A for horseshoe
+         "\u0075", "\u025C", "\u0259", "\u0268", "\u025A",
+         "\u0070", "\u0074", "\u006B", "\u0062", "\u0064", "\u0067", #stops
+         "\u0073", "\u0283", "\u007A", "\u0292",                     #sib frics
+         "\u0066", "\u03B8", "\u0076", "\u00F0", "\u0068",           #non-sib frics
+         "\u006E", "\u006D", "\u014B",                               #nasals
+         "\u006C", "\u0072", "\u0077", "\u006A", "\u0041")           #glides & semi-vowels
+           
+          #As a reminder, "\u0041" is "A". I'm not converting this to "\u0065" "e" here. 
+          #See note in double char table
+klattese <- c("\u0069", "\u026A", "\u0045", "\u0040",          #vowels
+              "\u0061", "\u005E", "\u0063", "\u006F", "\u0055", 
+              "\u0075", "\u0052", "\u0078", "\u007C", "\u0058",
+              "\u0070", "\u0074", "\u006B", "\u0062", "\u0064", "\u0067", #stops
+              "\u0073", "\u0053", "\u007A", "\u005A",                     #sib frics
+              "\u0066", "\u0054", "\u0076", "\u0044", "\u0068",           #non-sib frics
+              "\u006E", "\u006D", "\u0047",                               #nasals
+              "\u006c", "\u0072", "\u0077", "\u0079", "\u0065")                      #glides & semi-vowels
+              
+#create lookup table
+lookup_single_chars <- data.frame(ipa.guide, ipa, klattese)
+
+```
+
+# Cambridge uses a few symbols/characters that differ from "standard" IPA
+
+* epsilon is /e/. So I will convert /e/ to E. 
+
+* Because they use /e/ for epsilon, this created a small problem. I couldn't convert /ei/ to /e/ because then /e/ would become epsilon downstream. So I convert /e/ to /A/ in the double char. Then in the single char, /e/ converts to epsilon before /A/ converts to /e/. This the conversions turn out accurately. 
+
+* [ɝ] is written as [3] in 
+
+```{r convert, include=FALSE}
+evp.1 <- df |> 
+  dplyr::mutate(klattese = stringr::str_replace_all(IPA, "[/ː̬]", "" )) |> #create "klattese" column from IPA, and delete [unwanted chars]
+  dplyr::mutate(klattese = stringr::str_replace_all(klattese,   #first pass: replace double chars with klattese chars
+                             (setNames(lookup_double_chars$klattese, lookup_double_chars$ipa)))) |>
+  dplyr::mutate(klattese = stringr::str_replace_all(klattese,   #second pass: replace single chars
+         (setNames(lookup_single_chars$klattese, lookup_single_chars$ipa)))) |> 
+  dplyr::select(word, IPA, klattese, pos:topic, index) #move klattese column next to IPA
+```
+# references used in the "convert" code block
+* https://stackoverflow.com/questions/67933630/replace-parts-of-text-values-with-a-lookup-table*
+* https://stringr.tidyverse.org/reference/str_replace.html
+* https://vbaliga.github.io/replace-text-in-specific-column/ 
+
+
+#Code block "debugging"
+* 1) I needed to delete 'duplicate' letters from words like "eighteen". Cambridge transcribes this as /eɪtˈtiːn/, so [t] is the final consonant of one syllable and onset of the next. 
+
+
+* 2-5) Sometimes two transcriptions are given for an entry, but they are exactly the same. A 'ctrl + f' search in excel showed there are 5000+ commas. That means probably most of those are just duplicate transcriptions given. This code finds the duplicates and deletes them, but it does not delete it if it's an alternate pronunciation. And after I ran this code, it was down to about 400, all of which were transcriptions with alternate pronunciations. Nice! Note: The duplicate pronunciations may have been because the word belonged to multiple grammatical categories. 
+
+```{r debugging, include=FALSE}
+# 1) delete duplicate letters occurring at offset of syllable and onset of following syllable 
+
+evp.1$klattese <- gsub("([a-zA-Z0-9&\\s])\\1+", "\\1", evp.1$klattese, perl=TRUE) #this is a gsub (global substitution) of lower case and upper case letters as well as numbers. 
+
+# 2) find a duplicate transcription within one klattese entry  
+ 
+evp.1$klattese <- sapply(evp.1$klattese, #sapply works like a for loop
+                       function(x) paste(unique(unlist(stringr::str_split(x,", "))), 
+                       collapse = ", "))
+                       #the function splits each row at a comma, then unlists (converts list to vector)
+                      #finds the unique item 
+                      #paste() concatenates and collapse adds a comma between each entry in row
+
+# 3) Repeat setp 2 but for "$IPA column
+evp.1$IPA <- sapply(evp.1$IPA, 
+                       function(x) paste(unique(unlist(stringr::str_split(x,", "))), 
+                       collapse = ", "))
+
+# 4) repeat step 2 but for POS
+evp.1$pos <- sapply(evp.1$pos, 
+                       function(x) paste(unique(unlist(stringr::str_split(x,", "))), 
+                       collapse = ", "))
+
+
+
+# 5) For any klattese, IPA, or POS cells with two unique entries, split into two cells.   
+evp.2 <- evp.1 |> 
+  #separate second klattese item (if it exists) into new column
+  tidyr::separate_wider_delim(klattese, 
+                              names = c("klattese", "klattese_2"), 
+                              delim = ", ", 
+                              too_few = "align_start", #if too few, add NA to second column,
+                              too_many = "merge") |> # if too many, merge them
+  #repeat with "pos"
+  tidyr::separate_wider_delim(pos, 
+                              names = c("pos", "pos_2"), 
+                              delim = ", ", 
+                              too_few = "align_start", too_many = "merge") |> 
+  #repeat with "IPA"
+
+  tidyr::separate_wider_delim(IPA, 
+                               names = c("IPA", "IPA_2"), delim = ", ",
+                               too_few = "align_start", too_many = "merge") |> 
+  #select columns 
+  dplyr::select(word, IPA, IPA_2, klattese, klattese_2, pos, pos_2:topic, index) |>  
+  dplyr::rename(POS = "pos", POS_2 = pos_2)
+```
+
+
+Replace schwa plus consonant to create syllabic consonants
+```{r syllabic_cons, include=FALSE}
+evp.3 <- evp.2 |> 
+    dplyr::mutate(klattese = stringr::str_replace_all(klattese, "xl", "L" )) |> #create "klattese" column from IPA, and delete [unwanted chars]
+    dplyr::mutate(klattese = stringr::str_replace_all(klattese, "xr", "X" )) |>  #create "klattese" column from IPA, and delete [unwanted chars]
+    dplyr::mutate(klattese = stringr::str_replace_all(klattese, "xn", "N" )) |> 
+    dplyr::mutate(klattese = stringr::str_replace_all(klattese, "xm", "M" ))
+```
+
+Now make three variations of $klattese. 
+ 1) stress and syllables are marked $klattese_stress
+ 2) only syllable boundaries are marked (using periods) $klattese_syllable
+ 3) no stress or syllables are marked ($klattese)
+
+```{r syllabic_cons, include=FALSE}
+
+evp.4  <- evp.3 |> 
+  # $klattese_stress includes markers for stress and syllables
+  dplyr::mutate(klattese_stress = stringr::str_replace_all(klattese, "ˈˈ", "ˈ")) |> # this fixed "ˈˈfirst-floor" 
+  # $klattese_syllable only marks syllables
+  dplyr::mutate(klattese_syllable = klattese) |>
+  dplyr::mutate(klattese_syllable = stringr::str_replace_all(klattese, "[ˈˌ̬]", "."))  |>  #replace stress markers w/ periods
+  dplyr::mutate(klattese_syllable = stringr::str_replace(klattese_syllable, "^\\.", ""))  |>  
+  # $klattese = phonemes only
+  dplyr::mutate(klattese = stringr::str_replace_all(klattese, "[.ˈˌ̬]", ""))  |>  #delete stress and syllable markers
+  dplyr::select(word:klattese_2, klattese_syllable, klattese_stress, POS:index)
+
+
+evp.4$klattese_syllable[evp.4$klattese_syllable == ".fRst.flcr"] <- "fRst.flcr"
+#this one kept adding an extra period at the beginning, and when if I tried to fix it in the code above, it deleted the first character of 5 words (only!). So this was an easier work around. 
+```
+
+
+Vitevitch seems inconsistent to me in use of syllabic N and M (it's probably just what was marked in the dictionary they used though). They were consistent with syllabic l and r though. So his transcriptions of syllabic n and m wouldn't agree with mine. He also uses the high central i (with line through it) vowel in unstressed positions instead of schwa though, so our transcriptions wouldn't always agree anyway. 
+
+
+```{r write, include=FALSE}
+openxlsx::write.xlsx(evp.4, file = "transcribed_klattese_EVP.xlsx")
+```
+

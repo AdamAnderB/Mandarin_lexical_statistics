@@ -1,0 +1,17 @@
+---
+title: "main_script"
+author: "Adam A. Bramlett"
+date: "2024-05-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+list.files("../corpus/")
+corpus<-read.csv("../corpus/chineselexicaldatabase2.1.csv")
+
+View(corpus)
+```
